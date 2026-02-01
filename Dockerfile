@@ -37,9 +37,15 @@ FROM ${BUILDER_IMAGE} as builder
 
 
 # install build dependencies
-RUN apt-get update -y && apt-get install -y build-essential git nodejs npm curl wget && apt-get clean && rm -f /var/lib/apt/lists/*_*
-RUN npm install -g npm@9.8.1
-# RUN wget -O - 'https://github.com/elm/compiler/releases/download/0.19.1/binary-for-linux-64-bit.gz' | gunzip -c >/usr/local/bin/elm
+RUN apt-get update -y && apt-get install -y build-essential git curl wget && apt-get clean && rm -f /var/lib/apt/lists/*_*
+
+# Install modern Node.js without NodeSource (works on arm64)
+RUN curl -L https://raw.githubusercontent.com/tj/n/master/bin/n -o /usr/local/bin/n \
+ && chmod +x /usr/local/bin/n \
+ && n 20.11.1 \
+ && npm install -g npm@10
+
+# Elm (arm64-friendly via npm)
 RUN npm install -g elm@0.19.1-5
 
 # make the elm compiler executable
