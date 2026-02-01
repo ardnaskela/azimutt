@@ -139,10 +139,5 @@ COPY --from=builder --chown=nobody:root /app/priv/static/blog ./bin/priv/static/
 RUN echo "nameserver 8.8.8.8" > /etc/resolv.conf && \
     echo "nameserver 8.8.4.4" >> /etc/resolv.conf
 
-# Test internet connectivity during build
-RUN echo "Testing internet connectivity..." && \
-    curl -s --connect-timeout 10 https://google.com > /dev/null && \
-    echo "Internet access OK" || echo "Warning: No internet access during build"
-
 USER nobody
 CMD ["sh", "-c", "/app/bin/migrate && /app/bin/server"]
