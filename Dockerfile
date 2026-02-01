@@ -124,6 +124,13 @@ ENV PHX_SERVER="true"
 WORKDIR "/app"
 RUN chown nobody /app
 
+RUN chown nobody /app
+
+# ADD THESE 3 LINES HERE:
+RUN mkdir -p /app/bin/uploads && \
+    chown -R nobody:root /app/bin/uploads && \
+    chmod -R 755 /app/bin/uploads
+
 COPY --from=builder --chown=nobody:root /app/_build/${MIX_ENV}/rel/azimutt ./
 RUN mkdir -p ./app/bin/priv/static/
 COPY --from=builder --chown=nobody:root /app/priv/static/blog ./bin/priv/static/blog
