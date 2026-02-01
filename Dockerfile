@@ -1,18 +1,4 @@
-# Find eligible builder and runner images on Docker Hub. We use Ubuntu/Debian instead of
-# Alpine to avoid DNS resolution issues in production.
-#
-# https://hub.docker.com/r/hexpm/elixir/tags?page=1&name=ubuntu
-# https://hub.docker.com/_/ubuntu?tab=tags
-#
-#
-# This file is based on these images:
-#
-#   - https://hub.docker.com/r/hexpm/elixir/tags - for the build image
-#   - https://hub.docker.com/_/debian?tab=tags&page=1&name=bullseye-20210902-slim - for the release image
-#   - https://pkgs.org/ - resource for finding needed packages
-#   - Ex: hexpm/elixir:1.12.0-erlang-24.0.1-debian-bullseye-20210902-slim
-#
-
+# Dockerfile (Azimutt) - patched for multi-arch / ARM64 builds
 ARG ELIXIR_VERSION=1.14.3
 ARG OTP_VERSION=25.2.2
 ARG OTP_MAJOR=25
@@ -30,33 +16,34 @@ ARG STRIPE_WEBHOOK_SIGNING_SECRET
 ARG PHX_SERVER
 ARG DATABASE_URL
 
+# Use an official multi-arch Elixir image (includes arm64)
 ARG BUILDER_IMAGE="elixir:1.16.3-otp-25-slim"
 ARG RUNNER_IMAGE="debian:bullseye-slim"
 
 FROM ${BUILDER_IMAGE} as builder
 
+# install build dependencies (keep minimal but sufficient)
+RUN apt-get update -y \
+  && apt-get install -y --no-install-recommends \
+     build-essential git curl wget ca-certificates gnupg \
+  && apt-get clean \
+  && rm -rf /var/lib/apt/lists/*
 
-# install build dependencies
-RUN apt-get update -y && apt-get install -y build-essential git curl wget && apt-get clean && rm -f /var/lib/apt/lists/*_*
-
-# Install modern Node.js without NodeSource (works on arm64)
+# Install modern Node.js without NodeSource (works on arm64) using `n`
+# and upgrade npm to a modern version.
 RUN curl -L https://raw.githubusercontent.com/tj/n/master/bin/n -o /usr/local/bin/n \
  && chmod +x /usr/local/bin/n \
+ # Install Node 20 (adjust version if you prefer another 20.x)
  && n 20.11.1 \
- && npm install -g npm@10
+ # Ensure npm is recent and stable
+ && npm install -g npm@10 \
+ && node --version \
+ && npm --version
 
-# Install Elm compiler (multi-arch) from GitHub releases
-RUN set -eux; \
-  arch="$(dpkg --print-architecture)"; \
-  case "$arch" in \
-    amd64)  elm_arch="linux-x64" ;; \
-    arm64)  elm_arch="linux-arm64" ;; \
-    *) echo "Unsupported arch: $arch" >&2; exit 1 ;; \
-  esac; \
-  curl -fsSL "https://github.com/elm/compiler/releases/download/0.19.1/binary-for-${elm_arch}.gz" \
-    | gunzip -c > /usr/local/bin/elm; \
-  chmod +x /usr/local/bin/elm; \
-  elm --version
+# Install Elm compiler (arm64-friendly) via the maintained npm distribution
+# that contains compatible binaries for linux/arm64.
+RUN npm install -g @carwow/elm@0.19.1 \
+ && elm --version
 
 # prepare build dir
 WORKDIR /app
@@ -68,39 +55,33 @@ RUN mix local.hex --force && \
 # set build ENV
 ENV MIX_ENV="prod"
 
-# install mix dependencies
+# copy and fetch mix deps
 COPY backend/mix.exs backend/mix.lock ./
-
 RUN mix deps.get --only $MIX_ENV
 RUN mkdir config
 
 # copy compile-time config files before we compile dependencies
-# to ensure any relevant config change will trigger the dependencies
-# to be re-compiled.
 COPY backend/config/config.exs backend/config/${MIX_ENV}.exs config/
 RUN mix deps.compile
 
 COPY backend/priv priv
 
-# note: if your project uses a tool like https://purgecss.com/,
-# which customizes asset compilation based on what it finds in
-# your Elixir templates, you will need to move the asset compilation
-# step down so that `lib` is available.
+# copy assets and frontend sources
 COPY backend/assets assets
-
 COPY package.json .
 COPY pnpm-workspace.yaml .
 COPY pnpm-lock.yaml .
 COPY libs/ libs
 COPY frontend/ frontend
 
+# install pnpm and build frontend assets (this step runs the project's build:docker)
 RUN npm install -g pnpm@9.5.0
 RUN npm run build:docker
 
 # Compile the release
 COPY backend/lib lib
 
-# compile assets
+# compile assets for Phoenix
 RUN cd assets && npm install
 RUN mix assets.deploy
 
@@ -116,14 +97,18 @@ RUN mix release
 # the compiled release and other runtime necessities
 FROM ${RUNNER_IMAGE}
 
-RUN apt-get update -y && apt-get install -y libstdc++6 openssl libncurses5 locales && apt-get clean && rm -f /var/lib/apt/lists/*_*
+# runtime deps
+RUN apt-get update -y \
+  && apt-get install -y --no-install-recommends libstdc++6 openssl libncurses5 locales ca-certificates \
+  && apt-get clean \
+  && rm -rf /var/lib/apt/lists/*
 
 # Set the locale
 RUN sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen && locale-gen
 
-ENV LANG en_US.UTF-8
-ENV LANGUAGE en_US:en
-ENV LC_ALL en_US.UTF-8
+ENV LANG=en_US.UTF-8
+ENV LANGUAGE=en_US:en
+ENV LC_ALL=en_US.UTF-8
 
 ENV S3_KEY_ID=${S3_KEY_ID}
 ENV S3_HOST=${S3_HOST}
@@ -140,7 +125,6 @@ ENV PHX_SERVER="true"
 
 WORKDIR "/app"
 RUN chown nobody /app
-
 
 # Only copy the final release from the build stage
 COPY --from=builder --chown=nobody:root /app/_build/${MIX_ENV}/rel/azimutt ./
