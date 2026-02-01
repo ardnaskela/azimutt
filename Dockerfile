@@ -71,7 +71,14 @@ COPY pnpm-lock.yaml .
 COPY libs/ libs
 COPY frontend/ frontend
 
+# install pnpm
 RUN npm install -g pnpm@9.5.0
+
+# install JS deps but skip lifecycle scripts (preinstall/postinstall) that try to run the failing elm installer
+# use the lockfile to ensure deterministic deps
+RUN pnpm install --frozen-lockfile --ignore-scripts
+
+# now run the project's build, which will use the global `elm` binary we installed earlier
 RUN npm run build:docker
 
 # Compile the release
