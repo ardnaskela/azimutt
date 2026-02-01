@@ -45,11 +45,18 @@ RUN curl -L https://raw.githubusercontent.com/tj/n/master/bin/n -o /usr/local/bi
  && n 20.11.1 \
  && npm install -g npm@10
 
-# Elm (arm64-friendly via npm)
-RUN npm install -g elm@0.19.1-5
-
-# make the elm compiler executable
-RUN chmod +x /usr/local/bin/elm
+# Install Elm compiler (multi-arch) from GitHub releases
+RUN set -eux; \
+  arch="$(dpkg --print-architecture)"; \
+  case "$arch" in \
+    amd64)  elm_arch="linux-x64" ;; \
+    arm64)  elm_arch="linux-arm64" ;; \
+    *) echo "Unsupported arch: $arch" >&2; exit 1 ;; \
+  esac; \
+  curl -fsSL "https://github.com/elm/compiler/releases/download/0.19.1/binary-for-${elm_arch}.gz" \
+    | gunzip -c > /usr/local/bin/elm; \
+  chmod +x /usr/local/bin/elm; \
+  elm --version
 
 # prepare build dir
 WORKDIR /app
